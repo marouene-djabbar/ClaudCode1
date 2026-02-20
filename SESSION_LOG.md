@@ -35,3 +35,9 @@
 - Created remote repo: https://github.com/marouene-djabbar/ClaudCode1
 - Added origin remote and pushed master branch
 - Repo is now live on GitHub
+
+### Data & Environment Setup
+- Added parquet data: `parquet_01/` folder with 20 files (`book20_ml_*.parquet`)
+- Decided to use a temporary Python venv to explore the data now
+- Plan to delete venv later and install Miniconda for a proper long-term environment
+- Next step: create `.venv`, install pandas + pyarrow, explore parquet files
