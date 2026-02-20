@@ -75,3 +75,8 @@
 - Improve Down class prediction (currently weakest)
 - Replace `.venv` with Miniconda environment
 - Consider more features or feature engineering
+
+### Future Goals
+- Explore remote communication with Claude (e.g. Slack bot via Claude API)
+  - Would allow monitoring long-running jobs without being physically present
+  - Requires building a custom Slack integration — noted as a future project
