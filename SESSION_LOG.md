@@ -27,3 +27,11 @@
 - Verify if `.git` folder exists in `C:\Users\marou\Documents\ClaudCode1`
 - If not, run `git init` (step-by-step with user)
 - Then connect to GitHub or GitLab (user to decide)
+
+## Session 3 — 2026-02-20
+### GitHub Setup
+- Installed GitHub CLI (gh)
+- Logged in via `gh auth login` as marouene-djabbar
+- Created remote repo: https://github.com/marouene-djabbar/ClaudCode1
+- Added origin remote and pushed master branch
+- Repo is now live on GitHub
