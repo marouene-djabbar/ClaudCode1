@@ -125,11 +125,189 @@
 - Single snapshot insufficient for 1s move detection — too little signal
 - class_weight='balanced' helps but doesn't fix fundamental imbalance problem
 
+### Next Steps (completed — see Session 5 below)
+- Sliding window features tested
+- Full pipeline built and evaluated
+- GPU discovered → plan to move to deep learning
+
+## Session 5 — 2026-02-21
+
+### Overview
+This session focused on improving the move detector, building a full trading pipeline,
+and understanding how to combine two models to make a trading decision.
+
+---
+
+### Test 1 — Sliding Window Features for Move Detection (step6_sliding_window.py)
+**Goal:** Instead of using a single order book snapshot (82 features), use the last N
+snapshots stacked together (N x 82 features). The idea is that order book pressure
+builds gradually before a price move — a sequence of snapshots captures this better
+than a single photo.
+
+**Method:** For each row t, stack snapshots [t-N+1 ... t] into one feature vector.
+Train SGDClassifier (logistic regression) with partial_fit (batch processing) to avoid
+memory issues on 6.2M rows.
+
+**Results (full data, Move vs Flat, 1 second horizon):**
+| Window | Features | Test Acc | Move F1 | Move Recall |
+|--------|----------|----------|---------|-------------|
+| 1 (single) | 82 | 71% | 0.48 | 62% |
+| 10 (1s history) | 820 | 55% | 0.43 | 79% |
+| 20 (2s history) | 1,640 | 57% | 0.43 | 74% |
+| 30 (3s history) | 2,460 | 60% | 0.41 | 66% |
+
+**Conclusion:** Sliding window improves move recall (catches more moves) but reduces
+precision (more false alarms). Single snapshot still has best F1 and precision.
+The fundamental problem is the 80/20 class imbalance at 1 second — no window size fixes this.
+
+---
+
+### Test 2 — Decision Threshold Tuning (precision focus)
+**Goal:** The user prioritises AVOIDING LOSSES over catching every opportunity. A false
+alarm (model says "move", price stays flat) causes a bad trade. A missed move causes no
+cost. Therefore we care about PRECISION (when model says "move", how often is it right?),
+not recall.
+
+**Method:** Instead of default threshold of 0.50 (predict Move if probability > 50%),
+we raise the threshold to only fire when the model is very confident.
+
+**Results — 1 second horizon:**
+| Threshold | Precision | Recall | Signal% |
+|-----------|-----------|--------|---------|
+| 0.50 | 39% | 62% | 35% |
+| 0.75 | 64% | 17% | 6% |
+| 0.85 | 73% | 7% | 2% |
+| 0.95 | 88% | 2% | 0.5% |
+
+**Results — 5 second horizon (better because classes are 50/50 balanced):**
+| Threshold | Precision | Recall | Signal% |
+|-----------|-----------|--------|---------|
+| 0.50 | 64% | 59% | 44% |
+| 0.75 | 84% | 13% | 8% |
+| 0.85 | 88% | 5% | 2.8% |
+| 0.95 | 91% | 1% | 0.6% |
+
+**Decision: Lock in 5 second horizon, threshold = 0.85**
+- 88% precision — when it fires, it is right 88% of the time
+- Fires on 2.8% of rows — very selective, avoids overtrading
+- Saved as: model_move_5s.pkl, scaler_move_5s.pkl, threshold_move_5s.pkl
+
+**Key insight:** 5 second horizon gives much better precision than 1 second because the
+classes are naturally balanced (50/50 vs 80/20). A balanced dataset produces more
+reliable probability estimates.
+
+---
+
+### Test 3 — When Does the Move Happen Within the 5-Second Window?
+**Goal:** The move detector predicts a move within 5 seconds. We need to know WHEN in
+that window the move typically happens to decide how to time the trade.
+
+**Method:** For each row where the 5-second move was detected, scan forward tick by tick
+and record the first tick where |price_change| > 0.5.
+
+**Results (500K sample):**
+| Second | % of moves happening here | Cumulative |
+|--------|--------------------------|------------|
+| 1st second | 38% | 38% |
+| 2nd second | 22% | 60% |
+| 3rd second | 16% | 76% |
+| 4th second | 13% | 89% |
+| 5th second | 11% | 100% |
+- Median: 1.5 seconds after detection
+
+**Conclusion:** 60% of moves happen within the first 2 seconds. Waiting 4 seconds
+before trading (original idea) would mean missing 89% of moves. Must act immediately
+at time T when the signal fires.
+
+---
+
+### Test 4 — Direction Model for 5 Seconds (model_dir_5s.pkl)
+**Goal:** The existing direction model (model_h10.pkl) was trained to predict 1-second
+direction. Since we now hold trades for up to 5 seconds, we trained a new direction model
+specifically for 5-second direction prediction.
+
+**Method:** Keep only rows where price moved in 5 seconds (drop flat). Train binary
+Up/Down SGDClassifier on 5-second net price change direction.
+
+**Results (full data, 3.05M moved rows):**
+- Train accuracy: 71%
+- Test accuracy: 68% (vs 77% for 1-second model)
+
+**Conclusion:** 5-second direction is harder to predict than 1-second because more
+things can change over a longer horizon. 1-second model is better.
+
+---
+
+### Test 5 — Full 2-Stage Pipeline Evaluation
+**Goal:** Combine both models into a real trading simulation:
+- Stage 1 (move detector, 5s, threshold=0.85): fires when confident a move is coming
+- Stage 2 (direction model): predicts Up or Down
+- Enter trade at T, hold up to 5 seconds, exit when move happens
+
+**Three possible outcomes per signal:**
+- WIN: price moved in predicted direction within 5s
+- LOSS: price moved against predicted direction within 5s
+- NO TRADE: price did not move at all in 5s (exit flat, just fees)
+
+**Results comparing 1s vs 5s direction model (34,545 signals on test set):**
+| Outcome | 1s Direction Model | 5s Direction Model |
+|---------|-------------------|-------------------|
+| WIN | 54.4% | 53.9% |
+| LOSS | 33.3% | 33.8% |
+| NO TRADE | 12.3% | 12.3% |
+| WIN rate (of moves) | 62.0% | 61.5% |
+
+**Conclusion:** Both direction models give nearly identical pipeline results. The
+bottleneck is not the direction model horizon — it is the features. A single order book
+snapshot gives ~62% directional accuracy regardless of horizon. To improve beyond this
+ceiling we need richer features (sliding window history) or a stronger model.
+
+---
+
+### GPU Discovery
+- Machine has NVIDIA GeForce RTX 5070 with 12GB VRAM, CUDA 12.9
+- This enables GPU-accelerated training: LightGBM-GPU, XGBoost-GPU, PyTorch
+- RTX 5070 is powerful enough to train DeepLOB (CNN+LSTM) on 6.2M rows
+
+---
+
+### Saved Models
+| File | Description | Performance |
+|------|-------------|-------------|
+| model_h10.pkl | Binary Up/Down, 1s horizon | 77% accuracy on moved rows |
+| scaler_h10.pkl | Scaler for model_h10 | — |
+| model_move_5s.pkl | Move vs Flat, 5s horizon, threshold=0.85 | 88% precision |
+| scaler_move_5s.pkl | Scaler for model_move_5s | — |
+| threshold_move_5s.pkl | Decision threshold = 0.85 | — |
+| model_dir_5s.pkl | Binary Up/Down, 5s horizon | 68% accuracy |
+| scaler_dir_5s.pkl | Scaler for model_dir_5s | — |
+
+---
+
+### Scripts
+| File | Purpose |
+|------|---------|
+| step1_labeling.py | Load parquets, create labels |
+| step2_model.py | Binary Up/Down direction model |
+| step3_evaluate.py | Evaluate saved model on all data |
+| step4_move_detector.py | Move vs Flat detector |
+| step5_pipeline.py | Full 2-stage pipeline evaluation |
+| step6_sliding_window.py | Sliding window feature experiments |
+
+---
+
+### Key Findings Summary
+1. **Move detection**: 5s horizon with threshold=0.85 gives 88% precision — best move detector
+2. **Direction prediction**: 1s model (77%) beats 5s model (68%) — shorter horizon is more predictable
+3. **Pipeline result**: 62% WIN rate on actual moves, 12% NO TRADE, 26% false direction
+4. **Ceiling hit**: Logistic regression on single snapshot maxes out at ~62% direction accuracy
+5. **Sliding window**: Improves recall but hurts precision — not suitable for loss-averse trading
+6. **Next step**: Move to deep learning (DeepLOB / LSTM) with GPU support
+
+---
+
 ### Next Steps
-- Implement sliding window features (Option 5):
-  - Use last 10 snapshots (1 second history) as features instead of single snapshot
-  - 10 snapshots x 82 features = 820 features per row
-  - Same logistic regression model, much richer features
-  - Expected to improve Move detection at 1 second
-- After sliding window: revisit full 2-stage pipeline
-- Then move to LightGBM for further improvement
+- Replace temporary .venv with Miniconda + CUDA-enabled PyTorch
+- Implement DeepLOB or LSTM using GPU
+- Expected improvement: 70-80% direction accuracy (per literature)
+- Also explore: LightGBM with GPU as a fast intermediate step

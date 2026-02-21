@@ -2,131 +2,121 @@ import pandas as pd
 import numpy as np
 import glob
 import joblib
-from sklearn.linear_model import SGDClassifier
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
+from sklearn.metrics import precision_score, accuracy_score
 
 def log(msg): print(msg, flush=True)
 
 # --- Config ---
-THRESHOLD     = 0.5
-HORIZON_S1    = 50   # Stage 1: 5 seconds (move detector)
-HORIZON_S3    = 10   # Stage 3: 1 second  (direction)
-DATA_PATH     = "C:/Users/marou/Documents/ClaudCode1/parquet_01/*.parquet"
-MODEL_S3_PATH = "C:/Users/marou/Documents/ClaudCode1/model_h10.pkl"
-SCALER_S3_PATH= "C:/Users/marou/Documents/ClaudCode1/scaler_h10.pkl"
+THRESHOLD      = 0.5
+HORIZON_MOVE   = 50   # 5 seconds (move detector)
+HORIZON_DIR    = 10   # 1 second  (direction model)
+DATA_PATH      = "C:/Users/marou/Documents/ClaudCode1/parquet_01/*.parquet"
 
-BID_V = [f"bid_v_{i:02d}" for i in range(20)]
-ASK_V = [f"ask_v_{i:02d}" for i in range(20)]
-BID_P = [f"bid_p_{i:02d}" for i in range(20)]
-ASK_P = [f"ask_p_{i:02d}" for i in range(20)]
-BASE_FEATURES = ["spread_l1", "vol_imbalance_l1"] + BID_V + ASK_V
+# --- Load saved models ---
+log("Step 1/5 — Loading saved models...")
+model_move  = joblib.load("C:/Users/marou/Documents/ClaudCode1/model_move_5s.pkl")
+scaler_move = joblib.load("C:/Users/marou/Documents/ClaudCode1/scaler_move_5s.pkl")
+dec_thresh  = joblib.load("C:/Users/marou/Documents/ClaudCode1/threshold_move_5s.pkl")
+model_dir   = joblib.load("C:/Users/marou/Documents/ClaudCode1/model_h10.pkl")
+scaler_dir  = joblib.load("C:/Users/marou/Documents/ClaudCode1/scaler_h10.pkl")
+log(f"  Move detector loaded (threshold={dec_thresh})")
+log(f"  Direction model loaded")
 
-# --- Step 1: Load data ---
-log("Step 1/6 — Loading data...")
+# --- Load data ---
+log("\nStep 2/5 — Loading data...")
 files = sorted(glob.glob(DATA_PATH))
 df = pd.concat([pd.read_parquet(f) for f in files], ignore_index=True)
 df = df.sort_values("event_ts").reset_index(drop=True)
 log(f"  {len(df):,} rows loaded")
 
-# --- Step 2: Build features ---
-log("\nStep 2/6 — Building features...")
+# --- Build features ---
+log("\nStep 3/5 — Building features...")
+BID_V = [f"bid_v_{i:02d}" for i in range(20)]
+ASK_V = [f"ask_v_{i:02d}" for i in range(20)]
+BID_P = [f"bid_p_{i:02d}" for i in range(20)]
+ASK_P = [f"ask_p_{i:02d}" for i in range(20)]
+BASE  = ["spread_l1", "vol_imbalance_l1"] + BID_V + ASK_V
 for col in BID_P:
     df[col + "_dist"] = df["mid_price"] - df[col]
 for col in ASK_P:
     df[col + "_dist"] = df[col] - df["mid_price"]
-DIST_FEATURES = [c + "_dist" for c in BID_P] + [c + "_dist" for c in ASK_P]
-FEATURES = BASE_FEATURES + DIST_FEATURES
+DIST     = [c + "_dist" for c in BID_P] + [c + "_dist" for c in ASK_P]
+FEATURES = BASE + DIST
 df = df.dropna(subset=FEATURES).reset_index(drop=True)
 log(f"  {len(FEATURES)} features, {len(df):,} rows")
 
-# Use only rows where both horizons have valid future data
-max_horizon = max(HORIZON_S1, HORIZON_S3)
-valid = df.index[:-max_horizon]
-X_all = df.loc[valid, FEATURES].values
+# --- Build labels ---
+log("\nStep 4/5 — Building labels...")
+max_horizon = max(HORIZON_MOVE, HORIZON_DIR)
+valid       = df.index[:-max_horizon]
+X_all       = df.loc[valid, FEATURES].values
 
-# --- Step 3: Build labels for both stages ---
-log("\nStep 3/6 — Building labels...")
-change_s1 = df["mid_price"].shift(-HORIZON_S1) - df["mid_price"]
-change_s3 = df["mid_price"].shift(-HORIZON_S3) - df["mid_price"]
+# Move label: did price move in 5s?
+change_move = df["mid_price"].shift(-HORIZON_MOVE) - df["mid_price"]
+y_move      = np.where(np.abs(change_move.values[valid]) > THRESHOLD, 1, 0)
 
-y_s1 = np.where(np.abs(change_s1) > THRESHOLD, 1, 0)[valid]   # Move(1) vs Flat(0) at 5s
-y_s3 = np.where(change_s3 > THRESHOLD, 1,
-       np.where(change_s3 < -THRESHOLD, -1, 0))[valid]         # Up/Flat/Down at 1s
+# Direction label: Up/Down/Flat in 1s?
+change_dir  = df["mid_price"].shift(-HORIZON_DIR) - df["mid_price"]
+y_dir       = np.where(change_dir.values[valid] >  THRESHOLD,  1,
+              np.where(change_dir.values[valid] < -THRESHOLD, -1, 0))
 
-log(f"  Stage 1 labels — Flat: {(y_s1==0).sum():,} ({100*(y_s1==0).mean():.1f}%)  Move: {(y_s1==1).sum():,} ({100*(y_s1==1).mean():.1f}%)")
-log(f"  Stage 3 labels — Down: {(y_s3==-1).sum():,} ({100*(y_s3==-1).mean():.1f}%)  Flat: {(y_s3==0).sum():,} ({100*(y_s3==0).mean():.1f}%)  Up: {(y_s3==1).sum():,} ({100*(y_s3==1).mean():.1f}%)")
+# Chronological test set (last 20%)
+split   = int(len(X_all) * 0.8)
+X_test  = X_all[split:]
+ym_test = y_move[split:]
+yd_test = y_dir[split:]
+log(f"  Test set: {len(X_test):,} rows")
 
-# --- Step 4: Train Stage 1 (80/20 chronological split) ---
-log("\nStep 4/6 — Training Stage 1 (Move detector, 5s)...")
-split = int(len(X_all) * 0.8)
-X_train_s1 = X_all[:split]
-y_train_s1 = y_s1[:split]
+# --- Step 5: Run pipeline ---
+log("\nStep 5/5 — Running combined pipeline...")
 
-scaler_s1  = StandardScaler()
-X_train_s1_sc = scaler_s1.fit_transform(X_train_s1)
-X_all_s1_sc   = scaler_s1.transform(X_all)
+# Stage 1: Move detector
+X_move_sc = scaler_move.transform(X_test)
+move_probs = model_move.predict_proba(X_move_sc)[:, 1]
+move_fired = move_probs >= dec_thresh
 
-model_s1 = SGDClassifier(loss="log_loss", max_iter=100, random_state=42, class_weight="balanced")
-model_s1.fit(X_train_s1_sc, y_train_s1)
-log(f"  Stage 1 trained on {len(X_train_s1):,} rows")
-
-# --- Step 5: Load Stage 3 ---
-log("\nStep 5/6 — Loading Stage 3 (direction model, 1s)...")
-model_s3  = joblib.load(MODEL_S3_PATH)
-scaler_s3 = joblib.load(SCALER_S3_PATH)
-log("  Stage 3 loaded.")
-
-# --- Step 6: Run pipeline on test set ---
-log("\nStep 6/6 — Running full pipeline on test set...")
-X_test    = X_all[split:]
-y_s1_test = y_s1[split:]
-y_s3_test = y_s3[split:]
-
-# Stage 1 predictions
-X_test_s1_sc = scaler_s1.transform(X_test)
-pred_s1      = model_s1.predict(X_test_s1_sc)
-
-# Rows Stage 1 flags as Move
-move_mask    = pred_s1 == 1
-X_move       = X_test[move_mask]
-y_s3_move    = y_s3_test[move_mask]  # true direction labels for those rows
-y_s1_move    = y_s1_test[move_mask]  # true move labels for those rows
-
-log(f"\n  Test set: {len(X_test):,} rows")
-log(f"  Stage 1 flagged as Move: {move_mask.sum():,} ({100*move_mask.mean():.1f}%)")
-log(f"  Of those, actually had a move (5s): {y_s1_move.sum():,} ({100*y_s1_move.mean():.1f}%)")
-
-# Stage 3 predictions on flagged rows
-X_move_s3_sc = scaler_s3.transform(X_move)
-pred_s3      = model_s3.predict(X_move_s3_sc)
+# Stage 2: Direction model on ALL rows (applied only where move fired)
+X_dir_sc   = scaler_dir.transform(X_test)
+dir_pred   = model_dir.predict(X_dir_sc)   # -1 or 1
 
 log(f"\n{'='*60}")
-log("PIPELINE RESULTS")
+log("COMBINED PIPELINE RESULTS")
 log(f"{'='*60}")
 
-# Stage 1 standalone accuracy on test
-s1_acc = accuracy_score(y_s1_test, pred_s1) * 100
-log(f"\n  Stage 1 accuracy (Move vs Flat, 5s):  {s1_acc:.2f}%")
+total      = len(X_test)
+n_fired    = move_fired.sum()
+log(f"\n  Total test rows          : {total:>10,}")
+log(f"  Move detector fired      : {n_fired:>10,}  ({100*n_fired/total:.1f}%)")
 
-# Stage 3: evaluated only on non-flat ground truth rows
-nflat_mask = y_s3_move != 0
-if nflat_mask.sum() > 0:
-    s3_acc = accuracy_score(y_s3_move[nflat_mask], pred_s3[nflat_mask]) * 100
-    log(f"  Stage 3 accuracy (Up vs Down, 1s):    {s3_acc:.2f}%  (on {nflat_mask.sum():,} rows with actual moves)")
+# Of rows where move fired: was there actually a move in 5s?
+actual_move_5s  = ym_test[move_fired]
+correct_move    = actual_move_5s.sum()
+log(f"  Actually moved in 5s     : {correct_move:>10,}  ({100*correct_move/n_fired:.1f}% of signals) — Move Precision")
 
-# Combined: Stage 1 correct AND Stage 3 correct direction
-actually_moved_1s = y_s3_move != 0
-correct_direction = pred_s3 == y_s3_move
-combined_correct  = actually_moved_1s & correct_direction
-log(f"\n  Combined pipeline:")
-log(f"    Rows acted on (Stage 1 = Move):    {len(X_move):,}")
-log(f"    Of those, price actually moved 1s: {actually_moved_1s.sum():,} ({100*actually_moved_1s.mean():.1f}%)")
-log(f"    Of those, direction correct:       {combined_correct.sum():,} ({100*combined_correct.mean():.1f}%)")
+# Of rows where move fired: was there a move in 1s?
+actual_move_1s  = (yd_test[move_fired] != 0)
+moved_1s        = actual_move_1s.sum()
+log(f"  Actually moved in 1s     : {moved_1s:>10,}  ({100*moved_1s/n_fired:.1f}% of signals)")
 
-log(f"\n--- Stage 3 Classification Report (on Stage 1 flagged rows) ---")
-log(classification_report(y_s3_move, pred_s3,
-    target_names=["Down(-1)", "Flat(0)", "Up(1)"],
-    labels=[-1, 0, 1]))
+# Direction accuracy on rows that actually moved in 1s
+dir_on_moved    = dir_pred[move_fired][actual_move_1s]
+true_dir_moved  = yd_test[move_fired][actual_move_1s]
+dir_correct     = (dir_on_moved == true_dir_moved).sum()
+log(f"  Direction correct (1s)   : {dir_correct:>10,}  ({100*dir_correct/moved_1s:.1f}% of 1s movers)")
 
+# Combined: move fired AND price moved in 1s AND direction correct
+combined_correct = (move_fired) & (yd_test != 0) & (dir_pred == yd_test)
+log(f"\n  Combined correct trades  : {combined_correct.sum():>10,}  ({100*combined_correct.sum()/n_fired:.1f}% of all signals)")
+log(f"  Wrong direction trades   : {(move_fired & (yd_test != 0) & (dir_pred != yd_test)).sum():>10,}")
+log(f"  No move in 1s (flat)     : {(move_fired & (yd_test == 0)).sum():>10,}")
+
+log(f"\n{'='*60}")
+log("SUMMARY")
+log(f"{'='*60}")
+log(f"  When pipeline fires:")
+log(f"    - 88% chance price moves in 5s (move detector precision)")
+log(f"    - {100*moved_1s/n_fired:.1f}% chance price moves in 1s")
+log(f"    - {100*dir_correct/moved_1s:.1f}% direction accuracy when it does move in 1s")
+log(f"    - {100*combined_correct.sum()/n_fired:.1f}% of signals result in a correctly called trade")
 log("\nDone.")
