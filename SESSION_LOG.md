@@ -306,8 +306,92 @@ ceiling we need richer features (sliding window history) or a stronger model.
 
 ---
 
+### Next Steps (completed — see Session 6 below)
+- Miniconda + CUDA PyTorch installed
+- LSTM experiments run on GPU
+- DeepLOB identified as next step
+
+## Session 6 — 2026-02-21
+
+### Environment Setup
+- Miniconda 25.11.1 installed at C:\Users\marou\miniconda3
+- Conda env: `trading` with Python 3.11
+- PyTorch 2.12.0 nightly + CUDA 12.8 (supports RTX 5070 Ti sm_120 Blackwell)
+- Previous PyTorch 2.6+cu124 replaced — was incompatible with sm_120
+- All packages in `trading` env: pandas, pyarrow, scikit-learn, lightgbm, jupyter, joblib, torch
+
+### LSTM Experiments — Step 7 & 9
+
+All experiments use:
+- SEQ_LEN=10 (1 second of history, 10 snapshots)
+- Same 82 features as logistic regression models
+- Scaler fit on training data only (no leakage)
+- Chronological 80/20 train/test split
+- Class weights to handle imbalance
+- 10 epochs, batch size 1024, Adam optimizer, lr=0.001
+
+#### Window Size Experiment (step7_lstm.py)
+- SEQ_LEN=10 → best test acc 77.5% at epoch 1, drops to 75% by epoch 10 (overfitting)
+- SEQ_LEN=50 → same start 77.5%, drops to 71% by epoch 10 (worse overfitting)
+- Conclusion: more history does NOT help — signal is in current snapshot
+
+#### Full Experiment Suite (step9_lstm_all.py) — 7 experiments on GPU
+
+**GROUP A: 3-class Up/Down/Flat (all rows)**
+| Experiment | Best Test Acc | Notes |
+|------------|--------------|-------|
+| 3class_5s  | 53.1% | Random=33%, so +20% above random |
+| 3class_10s | 51.5% | Classes more balanced but harder |
+
+Flat class precision ~74%, Up/Down only 42-48% — model confuses direction with flat.
+
+**GROUP B: Binary Up/Down (moved rows only)**
+| Experiment | Best Test Acc | Notes |
+|------------|--------------|-------|
+| updown_1s  | 77.5% | Matches logistic regression baseline |
+| updown_5s  | 68.2% | +0.2% over logistic regression (68%) |
+| updown_10s | 64.2% | Same ceiling as logistic regression |
+
+LSTM matches but does not exceed logistic regression on direction prediction.
+
+**GROUP C: Binary Move/No-Move (all rows)**
+| Experiment | Best Test Acc | Notes |
+|------------|--------------|-------|
+| move_5s    | 69.0% | vs 64% for logistic regression — improvement! |
+| move_10s   | 68.1% | Good, classes more imbalanced (64% Move) |
+
+Move detection improved with LSTM: 69% vs 64% logistic regression at 5s.
+
+### Key Findings — Session 6
+
+1. **LSTM matches logistic regression on direction** — both plateau at ~77% (1s), 68% (5s)
+2. **LSTM improves move detection** — 69% vs 64% at 5s horizon
+3. **Overfitting is the main problem** — train acc reaches 86-90% but test drops after epoch 1-2
+4. **Larger window (SEQ_LEN=50) makes overfitting worse**, not better
+5. **Signal is in the current snapshot** — historical context adds noise, not signal
+6. **3-class problem is harder** — LSTM gets 53% vs 33% random, but Up/Down confused with Flat
+
+### Saved Models (Session 6)
+| File | Task | Acc |
+|------|------|-----|
+| model_updown_1s.pt | Binary Up/Down, 1s | 77.5% |
+| model_updown_5s.pt | Binary Up/Down, 5s | 68.2% |
+| model_updown_10s.pt | Binary Up/Down, 10s | 64.2% |
+| model_3class_5s.pt | 3-class, 5s | 53.1% |
+| model_3class_10s.pt | 3-class, 10s | 51.5% |
+| model_move_5s.pt | Move/No-Move, 5s | 69.0% |
+| model_move_10s.pt | Move/No-Move, 10s | 68.1% |
+
+Full detailed results saved to: `results_lstm.txt`
+
+### Scripts (Session 6)
+| File | Purpose |
+|------|---------|
+| step7_lstm.py | Binary Up/Down LSTM, window size experiments |
+| step8_lstm_3class.py | 3-class LSTM (superseded by step9) |
+| step9_lstm_all.py | Full experiment suite: all tasks × all horizons |
+
 ### Next Steps
-- Replace temporary .venv with Miniconda + CUDA-enabled PyTorch
-- Implement DeepLOB or LSTM using GPU
-- Expected improvement: 70-80% direction accuracy (per literature)
-- Also explore: LightGBM with GPU as a fast intermediate step
+- Try DeepLOB (CNN + LSTM) — CNN extracts spatial patterns across 20 bid/ask levels
+- Expected: DeepLOB may break 77% ceiling by learning cross-level features
+- Consider LightGBM-GPU as a fast tree-based baseline before DeepLOB

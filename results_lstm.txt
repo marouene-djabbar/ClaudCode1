@@ -1,0 +1,100 @@
+LSTM EXPERIMENT RESULTS
+SEQ_LEN=10  EPOCHS=10  BATCH=1024
+Device: cuda (NVIDIA GeForce RTX 5070 Ti Laptop GPU)
+
+Baselines (logistic regression):
+  Binary Up/Down 1s : 77%
+  Move/No-Move 5s   : 64% (88% precision at threshold=0.85)
+
+=================================================================
+Group    Experiment           Best Test Acc
+---------------------------------------------
+A        3class_5s                   53.1%
+A        3class_10s                  51.5%
+B        updown_1s                   77.5%
+B        updown_5s                   68.2%
+B        updown_10s                  64.2%
+C        move_5s                     69.0%
+C        move_10s                    68.1%
+
+=================================================================
+DETAILED CLASSIFICATION REPORTS
+=================================================================
+
+[A] 3class_5s  (best acc: 53.1%)
+              precision    recall  f1-score   support
+
+        Down       0.42      0.55      0.48    299428
+        Flat       0.74      0.51      0.60    635864
+          Up       0.42      0.55      0.48    304025
+
+    accuracy                           0.53   1239317
+   macro avg       0.53      0.54      0.52   1239317
+weighted avg       0.58      0.53      0.54   1239317
+
+
+[A] 3class_10s  (best acc: 51.5%)
+              precision    recall  f1-score   support
+
+        Down       0.48      0.52      0.50    385313
+        Flat       0.59      0.53      0.56    460835
+          Up       0.48      0.49      0.48    393159
+
+    accuracy                           0.51   1239307
+   macro avg       0.51      0.51      0.51   1239307
+weighted avg       0.52      0.51      0.52   1239307
+
+
+[B] updown_1s  (best acc: 77.5%)
+              precision    recall  f1-score   support
+
+        Down       0.78      0.78      0.78    124915
+          Up       0.77      0.77      0.77    123116
+
+    accuracy                           0.77    248031
+   macro avg       0.77      0.77      0.77    248031
+weighted avg       0.77      0.77      0.77    248031
+
+
+[B] updown_5s  (best acc: 68.2%)
+              precision    recall  f1-score   support
+
+        Down       0.68      0.69      0.68    302296
+          Up       0.69      0.68      0.68    307214
+
+    accuracy                           0.68    609510
+   macro avg       0.68      0.68      0.68    609510
+weighted avg       0.68      0.68      0.68    609510
+
+
+[B] updown_10s  (best acc: 64.2%)
+              precision    recall  f1-score   support
+
+        Down       0.63      0.65      0.64    395338
+          Up       0.65      0.63      0.64    403252
+
+    accuracy                           0.64    798590
+   macro avg       0.64      0.64      0.64    798590
+weighted avg       0.64      0.64      0.64    798590
+
+
+[C] move_5s  (best acc: 69.0%)
+              precision    recall  f1-score   support
+
+     No-Move       0.71      0.67      0.69    635864
+        Move       0.67      0.71      0.69    603453
+
+    accuracy                           0.69   1239317
+   macro avg       0.69      0.69      0.69   1239317
+weighted avg       0.69      0.69      0.69   1239317
+
+
+[C] move_10s  (best acc: 68.1%)
+              precision    recall  f1-score   support
+
+     No-Move       0.57      0.61      0.59    460835
+        Move       0.76      0.72      0.74    778472
+
+    accuracy                           0.68   1239307
+   macro avg       0.66      0.67      0.66   1239307
+weighted avg       0.69      0.68      0.68   1239307
