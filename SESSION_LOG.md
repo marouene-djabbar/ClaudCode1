@@ -80,3 +80,56 @@
 - Explore remote communication with Claude (e.g. Slack bot via Claude API)
   - Would allow monitoring long-running jobs without being physically present
   - Requires building a custom Slack integration — noted as a future project
+
+## Session 4 — 2026-02-21
+
+### Mid-price tick size clarification
+- Mid price moves in 0.25 steps (not 0.5) since mid = (bid+ask)/2
+- However in this dataset, mid price only moves in 0.5 steps in practice (bid/ask always move together)
+- Threshold of 0.5 confirmed correct for this dataset
+
+### Model Results Summary (full 6.2M rows)
+
+#### Binary Up/Down (drop flat rows)
+| Horizon | Moved Rows | Test Acc | Notes |
+|---------|------------|----------|-------|
+| 1s (10t) | 1.24M | 77% | Best direction model |
+| 5s (50t) | 3.05M | 68% | More rows, less accurate |
+
+#### Move vs Flat detector
+| Horizon | Flat% | Move% | Test Acc | Move F1 | Notes |
+|---------|-------|-------|----------|---------|-------|
+| 1s (10t) | 80% | 20% | 71% | 0.48 | Imbalanced, misleading accuracy |
+| 5s (50t) | 51% | 49% | 64% | 0.61 | Best balanced, +14% vs random |
+| 10s (100t) | 36% | 64% | 61% | 0.65 | Move dominates |
+
+#### Full pipeline evaluation (Stage 1 → Stage 3 applied to all 6.2M)
+- Binary model (trained on moved rows) applied to ALL data → 16% overall accuracy
+- Model never predicts Flat → fails completely on 80% flat rows
+- Confirmed: binary model only useful when move is already known
+
+### Saved Models
+- `model_h10.pkl` — binary Up/Down, 1 second horizon
+- `scaler_h10.pkl` — scaler for above model
+
+### Scripts
+- `step1_labeling.py` — label generation
+- `step2_model.py` — binary Up/Down model
+- `step3_evaluate.py` — evaluate saved model on all data
+- `step4_move_detector.py` — Move vs Flat detector
+- `step5_pipeline.py` — 2-stage pipeline (Stage 1 + Stage 3)
+
+### Key Insights
+- Short horizon (1s) better for direction prediction (order book directly shows pressure)
+- Longer horizon (5s) better for move detection (pressure builds gradually before move)
+- Single snapshot insufficient for 1s move detection — too little signal
+- class_weight='balanced' helps but doesn't fix fundamental imbalance problem
+
+### Next Steps
+- Implement sliding window features (Option 5):
+  - Use last 10 snapshots (1 second history) as features instead of single snapshot
+  - 10 snapshots x 82 features = 820 features per row
+  - Same logistic regression model, much richer features
+  - Expected to improve Move detection at 1 second
+- After sliding window: revisit full 2-stage pipeline
+- Then move to LightGBM for further improvement
