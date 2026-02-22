@@ -391,7 +391,55 @@ Full detailed results saved to: `results_lstm.txt`
 | step8_lstm_3class.py | 3-class LSTM (superseded by step9) |
 | step9_lstm_all.py | Full experiment suite: all tasks × all horizons |
 
+### DeepLOB Experiments (step10_deeplob.py)
+
+Architecture: CNN spatial block + Inception module (4 branches) + LSTM + FC
+- CNN: Conv(1x2) → Conv(1x2) → Conv(1x20) extracts patterns across 20 LOB levels
+- Inception: parallel 1x1, 3x1, 5x1, MaxPool branches capture multi-scale patterns
+- LSTM: 128 → 64 hidden units for temporal modelling
+- Features: 80 (20 levels × [bid_p_dist, bid_vol, ask_p_dist, ask_vol]) — spatially arranged
+- 85,410 parameters, batch=512, epochs=15, lr=0.0001 with ReduceLROnPlateau
+
+**DeepLOB Results vs LSTM and Logistic Regression:**
+| Task | Horizon | Log Reg | LSTM | DeepLOB |
+|------|---------|---------|------|---------|
+| Up/Down | 1s | 77% | 77.5% | **77.5%** |
+| Up/Down | 5s | 68% | 68.2% | **68.4%** |
+| 3-class | 5s | — | 53.1% | **55.6%** |
+| 3-class | 10s | — | 51.5% | **52.2%** |
+
+**Conclusion: 77% ceiling holds across all architectures.**
+DeepLOB is marginally better on 3-class (+2.5% at 5s) but doesn't break the direction ceiling.
+The bottleneck is the **data features**, not the model. All three architectures extract the same
+maximum signal from the 82 order book snapshot features.
+
+### Saved Models (DeepLOB)
+| File | Task | Acc |
+|------|------|-----|
+| deeplob_updown_1s.pt | Binary Up/Down, 1s | 77.5% |
+| deeplob_updown_5s.pt | Binary Up/Down, 5s | 68.4% |
+| deeplob_3class_5s.pt | 3-class, 5s | 55.6% |
+| deeplob_3class_10s.pt | 3-class, 10s | 52.2% |
+
+Full results: `results_deeplob.txt`
+
+### Overall Best Models Across All Sessions
+| Task | Best Model | Acc | File |
+|------|-----------|-----|------|
+| Up/Down 1s | LSTM or DeepLOB | 77.5% | model_updown_1s.pt |
+| Up/Down 5s | DeepLOB | 68.4% | deeplob_updown_5s.pt |
+| Move/No-Move 5s | LSTM | 69.0% | model_move_5s.pt |
+| Move/No-Move (precision) | Logistic Reg + threshold=0.85 | 88% precision | model_move_5s.pkl |
+| 3-class 5s | DeepLOB | 55.6% | deeplob_3class_5s.pt |
+
+### Key Insight — The Feature Ceiling
+All models (logistic regression, LSTM, DeepLOB) converge to the same accuracy on
+direction prediction (~77% at 1s). This means the ceiling is in the **input features**,
+not the model architecture. To improve further, we need:
+1. Trade flow data (actual executed trades, not just the book)
+2. Cross-asset features (BTC spot, ETH, funding rates)
+3. Microstructure features (order arrival/cancel rates, queue position)
+
 ### Next Steps
-- Try DeepLOB (CNN + LSTM) — CNN extracts spatial patterns across 20 bid/ask levels
-- Expected: DeepLOB may break 77% ceiling by learning cross-level features
-- Consider LightGBM-GPU as a fast tree-based baseline before DeepLOB
+- Explore new feature sources to break the 77% ceiling
+- Or accept the ceiling and focus on optimising the trading pipeline precision
