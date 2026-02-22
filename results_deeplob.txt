@@ -1,0 +1,68 @@
+DeepLOB EXPERIMENT RESULTS
+SEQ_LEN=10  EPOCHS=15  BATCH=512
+Device: cuda
+
+Architecture: CNN(1x2 x2, 1x20) + Inception(4 branches) + LSTM(128->64) + FC
+Features: 80 LOB features = 20 levels x [bid_p_dist, bid_vol, ask_p_dist, ask_vol]
+
+LSTM baselines:
+  Binary Up/Down 1s : 77.5%
+  Binary Up/Down 5s : 68.2%
+  3-class 5s        : 53.1%
+  3-class 10s       : 51.5%
+
+=================================================================
+Group    Experiment           Best Test Acc
+---------------------------------------------
+A        updown_1s                   77.5%
+A        updown_5s                   68.4%
+B        3class_5s                   55.6%
+B        3class_10s                  52.2%
+
+=================================================================
+DETAILED REPORTS
+
+[A] updown_1s  (best acc: 77.5%)
+              precision    recall  f1-score   support
+
+        Down       0.77      0.79      0.78    124915
+          Up       0.78      0.76      0.77    123116
+
+    accuracy                           0.77    248031
+   macro avg       0.77      0.77      0.77    248031
+weighted avg       0.77      0.77      0.77    248031
+
+
+[A] updown_5s  (best acc: 68.4%)
+              precision    recall  f1-score   support
+
+        Down       0.68      0.69      0.68    302296
+          Up       0.69      0.68      0.69    307214
+
+    accuracy                           0.68    609510
+   macro avg       0.68      0.68      0.68    609510
+weighted avg       0.68      0.68      0.68    609510
+
+
+[B] 3class_5s  (best acc: 55.6%)
+              precision    recall  f1-score   support
+
+        Down       0.45      0.53      0.48    299428
+        Flat       0.74      0.57      0.64    635864
+          Up       0.43      0.56      0.49    304025
+
+    accuracy                           0.56   1239317
+   macro avg       0.54      0.55      0.54   1239317
+weighted avg       0.59      0.56      0.57   1239317
+
+
+[B] 3class_10s  (best acc: 52.2%)
+              precision    recall  f1-score   support
+
+        Down       0.48      0.49      0.49    385313
+        Flat       0.61      0.54      0.57    460835
+          Up       0.48      0.52      0.50    393159
+
+    accuracy                           0.52   1239307
+   macro avg       0.52      0.52      0.52   1239307
+weighted avg       0.53      0.52      0.52   1239307
